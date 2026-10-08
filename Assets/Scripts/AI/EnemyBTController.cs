@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-public class EnemyBTController : MonoBehaviour, IHealth
+public class EnemyBTController : MonoBehaviour, IEnemyAI
 {
     [Header("References")]
     [SerializeField] private Transform player;
@@ -62,6 +62,16 @@ public class EnemyBTController : MonoBehaviour, IHealth
     public EnemyBlackboard Blackboard => blackboard;
     public string CurrentAction => currentAction;
 
+    // Versi ini murni Behavior Tree, tidak punya skor Utility
+    public IReadOnlyList<UtilityScore> UtilityScores => System.Array.Empty<UtilityScore>();
+    public string UtilityInfo => "";
+
+    // Personality (Modul 60 & 61)
+    private EnemyPersonality personality = EnemyPersonality.Normal;
+    private EnemyStats normalStats;
+
+    public EnemyPersonality Personality => personality;
+
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
@@ -70,6 +80,7 @@ public class EnemyBTController : MonoBehaviour, IHealth
             animator = GetComponentInChildren<Animator>();
 
         currentHealth = maxHealth;
+        normalStats = ReadStats();
     }
 
     private void Start()
@@ -370,10 +381,15 @@ public class EnemyBTController : MonoBehaviour, IHealth
             return NodeState.Failure;
 
         currentAction = "ATTACK";
-        
+
         if (animator != null)
         {
             animator.SetTrigger(AttackHash);
+        }
+        else
+        {
+            // Tanpa Animator tidak ada animation event, jadi damage langsung
+            DealAttackDamage();
         }
 
         return NodeState.Success;
@@ -478,9 +494,49 @@ public class EnemyBTController : MonoBehaviour, IHealth
     }
 
     [ContextMenu("Reset Health")]
-    private void ResetHealth()
+    public void ResetHealth()
     {
         currentHealth = maxHealth;
+    }
+
+    // ==================================================
+    // PERSONALITY (Modul 60 & 61)
+    // ==================================================
+
+    public void ApplyPersonality(EnemyPersonality newPersonality)
+    {
+        personality = newPersonality;
+        WriteStats(normalStats.WithPersonality(newPersonality));
+
+        // Cooldown Attack disimpan di dalam CooldownDecorator,
+        // jadi tree dibangun ulang supaya nilai baru dipakai.
+        if (rootNode != null)
+            BuildBehaviorTree();
+    }
+
+    private EnemyStats ReadStats()
+    {
+        return new EnemyStats
+        {
+            visionRange = visionRange,
+            visionAngle = visionAngle,
+            attackRange = attackRange,
+            attackCooldown = attackCooldown,
+            lowHealthThreshold = lowHealthThreshold,
+            chaseSpeed = chaseSpeed,
+            fleeSpeed = fleeSpeed
+        };
+    }
+
+    private void WriteStats(EnemyStats stats)
+    {
+        visionRange = stats.visionRange;
+        visionAngle = stats.visionAngle;
+        attackRange = stats.attackRange;
+        attackCooldown = stats.attackCooldown;
+        lowHealthThreshold = stats.lowHealthThreshold;
+        chaseSpeed = stats.chaseSpeed;
+        fleeSpeed = stats.fleeSpeed;
     }
 
     // ==================================================

@@ -2,11 +2,12 @@ using UnityEngine;
 
   public class EnemyAnimationEvents : MonoBehaviour
   {
-      private EnemyBTController controller;
+      // IEnemyAI supaya bekerja untuk BT, Utility, dan BT + Utility
+      private IEnemyAI controller;
 
       private void Awake()
       {
-          controller = GetComponentInParent<EnemyBTController>();
+          controller = GetComponentInParent<IEnemyAI>();
       }
 
       public void OnAttackHit()

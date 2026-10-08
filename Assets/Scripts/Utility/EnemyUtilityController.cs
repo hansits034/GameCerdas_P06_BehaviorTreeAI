@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.AI;
 
 // Attack, Chase, Flee, Patrol
-public class EnemyUtilityController : MonoBehaviour, IHealth
+public class EnemyUtilityController : MonoBehaviour, IEnemyAI
 {
     [Header("References")]
     [SerializeField] private Transform player;
@@ -31,6 +31,10 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
 
     [Header("Utility AI")]
     [SerializeField] private List<Action> actions;
+    [SerializeField] private float patrolScore = 0.1f;            // Modul 70 — default action
+    [SerializeField] private float threatMemory = 5f;             // detik Player masih dianggap ancaman setelah hilang
+    [SerializeField] private float minimumActionDuration = 0.5f;  // Modul 73 — Action Commitment
+    [SerializeField] private float hysteresisMargin = 0.15f;      // Modul 74 — Hysteresis
 
     [Header("Debug")]
     [SerializeField] private string currentAction = "None";
@@ -42,6 +46,12 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
 
     private EnemyBlackboard blackboard = new();
 
+    private Action selectedAction;
+    private float actionStartTime;
+    private float lastSeenTime = -999f;
+    private float nextAttackTime;
+    private readonly List<UtilityScore> scoreView = new();
+
     [Header("Animation")]
     [SerializeField] private Animator animator;
 
@@ -52,6 +62,27 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
     public int CurrentHealth => currentHealth;
     public int MaxHealth => maxHealth;
 
+    // Untuk panel debug
+    public string CurrentAction => currentAction;
+    public EnemyBlackboard Blackboard => blackboard;
+    public BTNode RootNode => null; // versi ini murni Utility, tanpa Behavior Tree
+    public IReadOnlyList<UtilityScore> UtilityScores => scoreView;
+
+    public string UtilityInfo
+    {
+        get
+        {
+            float commit = Mathf.Max(0f, minimumActionDuration - (Time.time - actionStartTime));
+            return $"commitment {commit:0.0}s   hysteresis +{hysteresisMargin:0.00}";
+        }
+    }
+
+    // Personality (Modul 60 & 61)
+    private EnemyPersonality personality = EnemyPersonality.Normal;
+    private EnemyStats normalStats;
+
+    public EnemyPersonality Personality => personality;
+
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
@@ -60,6 +91,7 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
             animator = GetComponentInChildren<Animator>();
 
         currentHealth = maxHealth;
+        normalStats = ReadStats();
     }
 
     private void Start()
@@ -76,23 +108,40 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
     private void Update()
     {
         UpdatePerception();
-        
-        Action bestAction = null;
-        float bestScore = -1;
 
-        foreach(Action action in actions)
+        // Hitung semua skor dulu (Modul 71)
+        foreach (Action action in actions)
+            action.score = action.CalculateScore(this);
+
+        // Pilih skor tertinggi + Action Commitment + Hysteresis (Modul 71, 73, 74)
+        Action bestAction = UtilitySelector.Select(
+            actions,
+            action => action.score,
+            selectedAction,
+            actionStartTime,
+            minimumActionDuration,
+            hysteresisMargin
+        );
+
+        if (bestAction != selectedAction)
         {
-            float score = action.CalculateScore(this);
-            if(score > bestScore)
-            {
-                bestAction = action;
-                bestScore = score;
-            }
+            selectedAction = bestAction;
+            actionStartTime = Time.time;
         }
 
-        bestAction.Execute(this);
+        RefreshScoreView();
+
+        selectedAction.Execute(this);
 
         UpdateAnimator();
+    }
+
+    private void RefreshScoreView()
+    {
+        scoreView.Clear();
+
+        foreach (Action action in actions)
+            scoreView.Add(new UtilityScore(action.Name, action.score, action == selectedAction));
     }
 
     // Modul 62
@@ -110,8 +159,16 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
         {
             blackboard.lastSeenPosition = player.position;
             blackboard.hasLastSeenPosition = true;
+            lastSeenTime = Time.time;
         }
     }
+
+    // ==================================================
+    // CONSIDERATIONS (Modul 67 - 70)
+    // ==================================================
+
+    // Modul 69 — visibility sebagai faktor wajib
+    private float VisibilityScore => blackboard.canSeePlayer ? 1f : 0f;
 
     // ==================================================
     // CONDITIONS
@@ -138,16 +195,16 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
 
     public class AttackAction : Action
     {
+        public override string Name => "Attack";
+
         public override float CalculateScore(EnemyUtilityController controller)
         {
-            float attackRangeScore;
-            attackRangeScore = Mathf.Clamp(1 - (controller.blackboard.distanceToPlayer / controller.attackRange), 0f, 1f);
+            // Modul 68 — semakin dekat, semakin tinggi
+            float distanceScore =
+                Mathf.Clamp01(1f - (controller.blackboard.distanceToPlayer / controller.attackRange));
 
-            int canSeePlayer;
-            canSeePlayer = controller.CanSeePlayer() ? 1 : 0;
-            
-            Debug.Log(Mathf.Clamp(attackRangeScore * 0.5f + canSeePlayer * 0.4f, 0f, 1f));
-            return Mathf.Clamp(attackRangeScore * 0.5f + canSeePlayer * 0.4f, 0f, 1f);
+            // Modul 69 — dikalikan, jadi tidak terlihat = 0
+            return distanceScore * controller.VisibilityScore;
         }
 
         public override void Execute(EnemyUtilityController controller)
@@ -156,23 +213,39 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
                 return;
 
             controller.currentAction = "ATTACK";
-            
+
+            controller.agent.isStopped = true;
+            controller.FacePlayer();
+
+            // Cooldown supaya tidak menyerang setiap frame (Modul 45)
+            if (Time.time < controller.nextAttackTime)
+                return;
+
+            controller.nextAttackTime = Time.time + controller.attackCooldown;
+
             if (controller.animator != null)
             {
                 controller.animator.SetTrigger(AttackHash);
             }
+            else
+            {
+                // Tanpa Animator tidak ada animation event, jadi damage langsung
+                controller.DealAttackDamage();
+            }
         }
     }
-    
+
     public class ChaseAction : Action
     {
+        public override string Name => "Chase";
+
         public override float CalculateScore(EnemyUtilityController controller)
         {
-            int canSeePlayer;
-            canSeePlayer = controller.CanSeePlayer() ? 1 : 0;
-            
-            Debug.Log(Mathf.Clamp(canSeePlayer * 0.5f, 0f, 1f));
-            return Mathf.Clamp(canSeePlayer * 0.5f, 0f, 1f);
+            // Modul 70 — distanceNeedScore: semakin jauh, semakin perlu dikejar
+            float distanceNeedScore =
+                Mathf.Clamp01(controller.blackboard.distanceToPlayer / controller.visionRange);
+
+            return controller.VisibilityScore * distanceNeedScore;
         }
 
         public override void Execute(EnemyUtilityController controller)
@@ -185,21 +258,44 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
             controller.agent.isStopped = false;
             controller.agent.speed = controller.chaseSpeed;
             controller.agent.stoppingDistance =
-                controller.attackRange * 0.8f;
+                controller.attackRange * 0.5f;
 
             controller.agent.SetDestination(controller.player.position);
         }
     }
-    
+
     public class FleeAction : Action
     {
+        public override string Name => "Flee";
+
         public override float CalculateScore(EnemyUtilityController controller)
         {
-            float fleeHealthScore;
-            fleeHealthScore = Mathf.Clamp(1 - (controller.currentHealth/controller.lowHealthThreshold), 0f, 1f);
+            // Modul 67 — pakai float supaya tidak terjadi pembagian integer
+            float healthPercent =
+                (float)controller.currentHealth / controller.maxHealth;
 
-            Debug.Log(fleeHealthScore);
-            return fleeHealthScore;
+            float thresholdPercent =
+                (float)controller.lowHealthThreshold / controller.maxHealth;
+
+            // 1 - healthPercent, dinormalisasi supaya bernilai 1 tepat di
+            // lowHealthThreshold. Dengan begitu personality ikut berpengaruh.
+            float lowHealthScore =
+                Mathf.Clamp01((1f - healthPercent) / Mathf.Max(0.01f, 1f - thresholdPercent));
+
+            // Kurva kuadrat: naik pelan saat HP masih tinggi, cepat saat kritis
+            lowHealthScore *= lowHealthScore;
+
+            // Di bawah threshold = darurat, kabur walaupun Player tidak terlihat
+            if (lowHealthScore >= 1f)
+                return 1f;
+
+            // Modul 70 — threatScore: 1 saat Player terlihat, lalu turun
+            // perlahan selama threatMemory detik setelah Player hilang
+            float threatScore = controller.blackboard.canSeePlayer
+                ? 1f
+                : Mathf.Clamp01(1f - (Time.time - controller.lastSeenTime) / controller.threatMemory);
+
+            return lowHealthScore * threatScore;
         }
 
         public override void Execute(EnemyUtilityController controller)
@@ -224,13 +320,15 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
             }
         }
     }
-    
+
     public class PatrolAction : Action
     {
+        public override string Name => "Patrol";
+
         public override float CalculateScore(EnemyUtilityController controller)
         {
-            Debug.Log(0.2f);
-            return 0.2f;
+            // Modul 70 — default action, selalu ada minimal satu pilihan
+            return controller.patrolScore;
         }
 
         public override void Execute(EnemyUtilityController controller)
@@ -331,6 +429,29 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
             playerHealth.TakeDamage(attackDamage);
     }
 
+    private void FacePlayer()
+    {
+        Vector3 direction =
+            player.position
+            - transform.position;
+
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude
+            < 0.001f)
+            return;
+
+        Quaternion targetRotation =
+            Quaternion.LookRotation(direction);
+
+        transform.rotation =
+            Quaternion.Slerp(
+                transform.rotation,
+                targetRotation,
+                10f * Time.deltaTime
+            );
+    }
+
     // ==================================================
     // HEALTH
     // ==================================================
@@ -365,9 +486,44 @@ public class EnemyUtilityController : MonoBehaviour, IHealth
     }
 
     [ContextMenu("Reset Health")]
-    private void ResetHealth()
+    public void ResetHealth()
     {
         currentHealth = maxHealth;
+    }
+
+    // ==================================================
+    // PERSONALITY (Modul 60 & 61)
+    // ==================================================
+
+    public void ApplyPersonality(EnemyPersonality newPersonality)
+    {
+        personality = newPersonality;
+        WriteStats(normalStats.WithPersonality(newPersonality));
+    }
+
+    private EnemyStats ReadStats()
+    {
+        return new EnemyStats
+        {
+            visionRange = visionRange,
+            visionAngle = visionAngle,
+            attackRange = attackRange,
+            attackCooldown = attackCooldown,
+            lowHealthThreshold = lowHealthThreshold,
+            chaseSpeed = chaseSpeed,
+            fleeSpeed = fleeSpeed
+        };
+    }
+
+    private void WriteStats(EnemyStats stats)
+    {
+        visionRange = stats.visionRange;
+        visionAngle = stats.visionAngle;
+        attackRange = stats.attackRange;
+        attackCooldown = stats.attackCooldown;
+        lowHealthThreshold = stats.lowHealthThreshold;
+        chaseSpeed = stats.chaseSpeed;
+        fleeSpeed = stats.fleeSpeed;
     }
 
     // ==================================================
