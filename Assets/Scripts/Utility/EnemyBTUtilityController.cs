@@ -1,8 +1,9 @@
 using System.Collections.Generic;
+using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.AI;
 
-public class EnemyBTController : MonoBehaviour, IHealth
+public class EnemyBTUtilityController : MonoBehaviour, IHealth
 {
     [Header("References")]
     [SerializeField] private Transform player;
@@ -46,6 +47,9 @@ public class EnemyBTController : MonoBehaviour, IHealth
     private EnemyBlackboard blackboard = new EnemyBlackboard();
 
     private float searchTimer = 0f; // Modul 63
+
+    [Header("Utility AI")]
+    [SerializeField] private List<Action> actions;
 
     [Header("Animation")]
     [SerializeField] private Animator animator;
@@ -122,42 +126,17 @@ public class EnemyBTController : MonoBehaviour, IHealth
             ).Named("Flee");
 
         // ------------------------------
-        // ATTACK
+        // COMBAT
         // ------------------------------
 
-        BTNode attackAction =
-            new ActionNode(AttackPlayer);
-
-        BTNode attackWithCooldown =
-            new CooldownDecorator(
-                attackAction,
-                attackCooldown
-            ).Named("Attack Cooldown");
-
-        BTNode attackSequence =
+        BTNode combatSequence =
             new SequenceNode(
                 new List<BTNode>
                 {
-                    new ConditionNode(() => blackboard.canSeePlayer).Named("Can See Player?"), // Modul 62
-                    new ConditionNode(() => blackboard.distanceToPlayer <= attackRange).Named("In Attack Range?"), // Modul 62
-                    attackWithCooldown
+                    new ConditionNode(() => blackboard.canSeePlayer).Named("Can See Player?"), // Modul 76
+                    new ActionNode(CombatUtility),
                 }
-            ).Named("Attack");
-
-        // ------------------------------
-        // CHASE
-        // ------------------------------
-
-        BTNode chaseSequence =
-            new SequenceNode(
-                new List<BTNode>
-                {
-                    new ConditionNode(() => blackboard.canSeePlayer).Named("Can See Player?"), // Modul 62
-                    new ActionNode(ChasePlayer)
-                }
-            ).Named("Chase");
-
-
+            ).Named("Combat");
 
         // ------------------------------
         // SEARCH (Modul 63)
@@ -180,9 +159,6 @@ public class EnemyBTController : MonoBehaviour, IHealth
         BTNode patrolAction =
             new ActionNode(Patrol);
 
-
-
-
         // ------------------------------
         // ROOT SELECTOR
         // ------------------------------
@@ -192,13 +168,95 @@ public class EnemyBTController : MonoBehaviour, IHealth
                 new List<BTNode>
                 {
                     fleeSequence,
-                    attackSequence,
-                    chaseSequence,
+                    combatSequence,
                     searchSequence, // Modul 63
                     patrolAction
                 }
 
             ).Named("Root");
+    }
+
+    private NodeState CombatUtility()
+    {
+        List<ActionBTUtility> actions = new()
+        {
+          new AttackAction(),
+          new ChaseAction()  
+        };
+
+        ActionBTUtility bestAction = null;
+        float bestScore = -1;
+
+        foreach(ActionBTUtility action in actions)
+        {
+            float score = action.CalculateScore(this);
+            if(score > bestScore)
+            {
+                bestAction = action;
+                bestScore = score;
+            }
+        }
+
+        return bestAction.Execute(this);
+    }
+
+    public class AttackAction : ActionBTUtility
+    {
+        public override float CalculateScore(EnemyBTUtilityController controller)
+        {
+            float attackRangeScore;
+            attackRangeScore = Mathf.Clamp(1 - (controller.blackboard.distanceToPlayer / controller.attackRange), 0f, 1f);
+
+            int canSeePlayer;
+            canSeePlayer = controller.CanSeePlayer() ? 1 : 0;
+            
+            Debug.Log(Mathf.Clamp(attackRangeScore * 0.5f + canSeePlayer * 0.4f, 0f, 1f));
+            return Mathf.Clamp(attackRangeScore * 0.5f + canSeePlayer * 0.4f, 0f, 1f);
+        }
+
+        public override NodeState Execute(EnemyBTUtilityController controller)
+        {
+            if (controller.player == null)
+                return NodeState.Failure;
+
+            controller.currentAction = "ATTACK";
+            
+            if (controller.animator != null)
+            {
+                controller.animator.SetTrigger(AttackHash);
+            }
+            
+            return NodeState.Success;
+        }
+    }
+    
+    public class ChaseAction : ActionBTUtility
+    {
+        public override float CalculateScore(EnemyBTUtilityController controller)
+        {
+            int canSeePlayer;
+            canSeePlayer = controller.CanSeePlayer() ? 1 : 0;
+            
+            Debug.Log(Mathf.Clamp(canSeePlayer * 0.5f, 0f, 1f));
+            return Mathf.Clamp(canSeePlayer * 0.5f, 0f, 1f);
+        }
+
+        public override NodeState Execute(EnemyBTUtilityController controller)
+        {
+            if (controller.player == null)
+                return NodeState.Failure;
+
+            controller.currentAction = "CHASE";
+
+            controller.agent.isStopped = false;
+            controller.agent.speed = controller.chaseSpeed;
+            controller.agent.stoppingDistance =
+                controller.attackRange * 0.8f;
+
+            controller.agent.SetDestination(controller.player.position);
+
+            return NodeState.Running;
+        }
     }
 
     // ==================================================
@@ -345,38 +403,6 @@ public class EnemyBTController : MonoBehaviour, IHealth
         }
 
         return NodeState.Running;
-    }
-
-    private NodeState ChasePlayer()
-    {
-        if (player == null)
-            return NodeState.Failure;
-
-        currentAction = "CHASE";
-
-        agent.isStopped = false;
-        agent.speed = chaseSpeed;
-        agent.stoppingDistance =
-            attackRange * 0.8f;
-
-        agent.SetDestination(player.position);
-
-        return NodeState.Running;
-    }
-
-    private NodeState AttackPlayer()
-    {
-        if (player == null)
-            return NodeState.Failure;
-
-        currentAction = "ATTACK";
-        
-        if (animator != null)
-        {
-            animator.SetTrigger(AttackHash);
-        }
-
-        return NodeState.Success;
     }
 
     public void DealAttackDamage()
