@@ -47,11 +47,21 @@ public class EnemyBTController : MonoBehaviour
 
     private float searchTimer = 0f; // Modul 63
 
+    [Header("Animation")]
+    [SerializeField] private Animator animator;
+
+    private static readonly int SpeedHash = Animator.StringToHash("Speed");
+    private static readonly int AttackHash = Animator.StringToHash("Attack");
+    private static readonly int HitHash = Animator.StringToHash("Hit");
 
 
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
+
+        if (animator == null)
+            animator = GetComponentInChildren<Animator>();
+
         currentHealth = maxHealth;
     }
 
@@ -66,6 +76,8 @@ public class EnemyBTController : MonoBehaviour
 
         if (rootNode != null)
             rootNode.Tick();
+
+        UpdateAnimator();
     }
 
     // Modul 62
@@ -353,28 +365,29 @@ public class EnemyBTController : MonoBehaviour
             return NodeState.Failure;
 
         currentAction = "ATTACK";
-
-        agent.isStopped = true;
-
-        FacePlayer();
-
-        Debug.Log(
-            name
-            + " attacks Player! Damage = "
-            + attackDamage
-        );
-
-        PlayerHealth playerHealth =
-            player.GetComponent<PlayerHealth>();
-
-        if (playerHealth != null)
+        
+        if (animator != null)
         {
-            playerHealth.TakeDamage(
-                attackDamage
-            );
+            animator.SetTrigger(AttackHash);
         }
 
         return NodeState.Success;
+    }
+
+    public void DealAttackDamage()
+    {
+        if (player == null || !blackboard.canSeePlayer || blackboard.distanceToPlayer > attackRange)
+        {
+            Debug.Log(name + " attack missed");
+            return;
+        }
+
+        Debug.Log(name + " attacks Player! Damage = " + attackDamage);
+
+        PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
+
+        if (playerHealth != null)
+            playerHealth.TakeDamage(attackDamage);
     }
 
     private NodeState Flee()
@@ -441,6 +454,11 @@ public class EnemyBTController : MonoBehaviour
                 maxHealth
             );
 
+        if (animator != null)
+        {
+            animator.SetTrigger(HitHash);
+        }
+
         Debug.Log(
             name
             + " Health = "
@@ -458,6 +476,23 @@ public class EnemyBTController : MonoBehaviour
     private void ResetHealth()
     {
         currentHealth = maxHealth;
+    }
+
+    // ==================================================
+    // ANIMATION
+    // ==================================================
+
+    private void UpdateAnimator()
+    {
+        if (animator == null)
+            return;
+
+        animator.SetFloat(
+            SpeedHash,
+            agent.velocity.magnitude,
+            0.1f,
+            Time.deltaTime
+        );
     }
 
     // ==================================================

@@ -7,6 +7,18 @@ public class PlayerHealth : MonoBehaviour
 
     private int currentHealth;
 
+    private Animator animator;
+
+    private static readonly int HitHash = Animator.StringToHash("Hit");
+    private static readonly int DieHash = Animator.StringToHash("Die");
+
+    public bool IsDead => currentHealth <= 0;
+
+    private void Awake()
+    {
+        animator = GetComponentInChildren<Animator>();
+    }
+
     private void Start()
     {
         currentHealth = maxHealth;
@@ -14,6 +26,8 @@ public class PlayerHealth : MonoBehaviour
 
     public void TakeDamage(int damage)
     {
+        if (IsDead) return;
+
         currentHealth -= damage;
 
         currentHealth =
@@ -31,6 +45,15 @@ public class PlayerHealth : MonoBehaviour
         if (currentHealth <= 0)
         {
             Debug.Log("Player Dead");
+
+            if (animator != null)
+            {
+                animator.SetTrigger(DieHash);
+            }
+        }
+        else if (animator != null)
+        {
+            animator.SetTrigger(HitHash);
         }
     }
 }
