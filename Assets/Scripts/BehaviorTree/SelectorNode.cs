@@ -9,7 +9,9 @@ public class SelectorNode : BTNode
         this.children = children;
     }
 
-    public override NodeState Tick()
+    public override IReadOnlyList<BTNode> Children => children;
+
+    protected override NodeState OnTick()
     {
         foreach (BTNode child in children)
         {

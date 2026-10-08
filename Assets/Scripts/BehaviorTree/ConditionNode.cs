@@ -9,7 +9,7 @@ public class ConditionNode : BTNode
         this.condition = condition;
     }
 
-    public override NodeState Tick()
+    protected override NodeState OnTick()
     {
         return condition()
             ? NodeState.Success

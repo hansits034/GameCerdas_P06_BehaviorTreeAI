@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class CooldownDecorator : BTNode
@@ -5,6 +6,7 @@ public class CooldownDecorator : BTNode
     private BTNode child;
     private float cooldown;
     private float nextAllowedTime;
+    private readonly BTNode[] childArray;
 
     public CooldownDecorator(
         BTNode child,
@@ -13,9 +15,17 @@ public class CooldownDecorator : BTNode
         this.child = child;
         this.cooldown = cooldown;
         nextAllowedTime = 0f;
+        childArray = new[] { child };
     }
 
-    public override NodeState Tick()
+    public override IReadOnlyList<BTNode> Children => childArray;
+
+    public override string DebugInfo =>
+        Time.time < nextAllowedTime
+            ? $"cooldown {nextAllowedTime - Time.time:0.0}s"
+            : "ready";
+
+    protected override NodeState OnTick()
     {
         if (Time.time < nextAllowedTime)
         {

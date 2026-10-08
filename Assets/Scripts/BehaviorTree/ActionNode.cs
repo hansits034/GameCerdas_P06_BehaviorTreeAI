@@ -7,9 +7,10 @@ public class ActionNode : BTNode
     public ActionNode(Func<NodeState> action)
     {
         this.action = action;
+        Named(action.Method.Name);
     }
 
-    public override NodeState Tick()
+    protected override NodeState OnTick()
     {
         return action();
     }

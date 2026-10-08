@@ -57,6 +57,11 @@ public class EnemyBTController : MonoBehaviour, IHealth
     public int CurrentHealth => currentHealth;
     public int MaxHealth => maxHealth;
 
+    // Untuk BTDebugger
+    public BTNode RootNode => rootNode;
+    public EnemyBlackboard Blackboard => blackboard;
+    public string CurrentAction => currentAction;
+
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
@@ -113,10 +118,10 @@ public class EnemyBTController : MonoBehaviour, IHealth
             new SequenceNode(
                 new List<BTNode>
                 {
-                    new ConditionNode(() => blackboard.healthLow), // Modul 62
+                    new ConditionNode(() => blackboard.healthLow).Named("Health Low?"), // Modul 62
                     new ActionNode(Flee)
                 }
-            );
+            ).Named("Flee");
 
         // ------------------------------
         // ATTACK
@@ -129,17 +134,17 @@ public class EnemyBTController : MonoBehaviour, IHealth
             new CooldownDecorator(
                 attackAction,
                 attackCooldown
-            );
+            ).Named("Attack Cooldown");
 
         BTNode attackSequence =
             new SequenceNode(
                 new List<BTNode>
                 {
-                    new ConditionNode(() => blackboard.canSeePlayer), // Modul 62
-                    new ConditionNode(() => blackboard.distanceToPlayer <= attackRange), // Modul 62
+                    new ConditionNode(() => blackboard.canSeePlayer).Named("Can See Player?"), // Modul 62
+                    new ConditionNode(() => blackboard.distanceToPlayer <= attackRange).Named("In Attack Range?"), // Modul 62
                     attackWithCooldown
                 }
-            );
+            ).Named("Attack");
 
         // ------------------------------
         // CHASE
@@ -149,10 +154,10 @@ public class EnemyBTController : MonoBehaviour, IHealth
             new SequenceNode(
                 new List<BTNode>
                 {
-                    new ConditionNode(() => blackboard.canSeePlayer), // Modul 62
+                    new ConditionNode(() => blackboard.canSeePlayer).Named("Can See Player?"), // Modul 62
                     new ActionNode(ChasePlayer)
                 }
-            );
+            ).Named("Chase");
 
 
 
@@ -164,10 +169,10 @@ public class EnemyBTController : MonoBehaviour, IHealth
             new SequenceNode(
                 new List<BTNode>
                 {
-                    new ConditionNode(() => blackboard.hasLastSeenPosition), // Modul 63
+                    new ConditionNode(() => blackboard.hasLastSeenPosition).Named("Has Last Seen Pos?"), // Modul 63
                     new ActionNode(SearchLastPosition)                       // Modul 63
                 }
-            );
+            ).Named("Search");
 
 
         // ------------------------------
@@ -195,7 +200,7 @@ public class EnemyBTController : MonoBehaviour, IHealth
                     patrolAction
                 }
 
-            );
+            ).Named("Root");
     }
 
     // ==================================================
