@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public class PlayerHealth : MonoBehaviour
+public class PlayerHealth : MonoBehaviour, IHealth
 {
     [SerializeField]
     private int maxHealth = 100;
@@ -14,13 +14,12 @@ public class PlayerHealth : MonoBehaviour
 
     public bool IsDead => currentHealth <= 0;
 
+    public int CurrentHealth => currentHealth;
+    public int MaxHealth => maxHealth;
+
     private void Awake()
     {
         animator = GetComponentInChildren<Animator>();
-    }
-
-    private void Start()
-    {
         currentHealth = maxHealth;
     }
 

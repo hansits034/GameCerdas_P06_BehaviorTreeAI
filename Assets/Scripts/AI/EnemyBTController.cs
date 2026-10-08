@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-public class EnemyBTController : MonoBehaviour
+public class EnemyBTController : MonoBehaviour, IHealth
 {
     [Header("References")]
     [SerializeField] private Transform player;
@@ -54,6 +54,8 @@ public class EnemyBTController : MonoBehaviour
     private static readonly int AttackHash = Animator.StringToHash("Attack");
     private static readonly int HitHash = Animator.StringToHash("Hit");
 
+    public int CurrentHealth => currentHealth;
+    public int MaxHealth => maxHealth;
 
     private void Awake()
     {
